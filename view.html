@@ -1,0 +1,466 @@
+/*
+* Author: Xiaoying Yu
+* Date:03/2016
+* Title: Interaction Forced Directed Graph to visualize the prefix and suffix of key words in passwords
+* How to: 1. Create drop down list and main layout. 
+*		  2. According to user's selection on drop down list, call GetJsonFile1.php to retrieve the relative connection information of the select words.
+*		  3. Then build the graph according to phpOut.json file, which is the result of GetJsonFile1.php. 
+*		  4. According to user's clicking on specific nodes in graph, GetTipWords.php retrieves all the passwords that include the cliced nodes.
+*		  5. Build tooltip to display all the passwords that got from step 4.
+*         6. This visualization includes other features: zoom in/out, filter, and so on.
+*
+*/
+
+<!DOCTYPE html>
+<meta charset="utf-8">
+<style>
+path.link 
+  fill: none;
+  stroke: #666;
+  color:black;
+}
+
+text {
+  font: 20px sans-serif;
+}
+
+ #tooltip {
+	position: absolute;
+	width: 160px;
+	height: auto;
+	padding: 10px;
+	background-color: yellow;
+	-webkit-border-radius: 10px;
+	-moz-border-radius: 10px;
+	border-radius: 10px;
+	-webkit-box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.4);
+	-moz-box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.4);
+	box-shadow: 4px 4px 10px rgba(0, 0, 0, 0.4);
+	pointer-events: none;
+ }
+
+  #tooltip.hidden {
+	display: none;
+  }
+
+  #tooltip p {
+	margin: 0;
+	font-family: sans-serif;
+	font-size: 12px;
+	line-height: 20px;
+  }
+  h2{
+	color:blue;
+	text-align:center;
+  }
+
+</style>
+<head>
+<title> Using Common Words to Analyze Passwords with Packing Digit and Symbols</title>
+</head>
+<div id="tooltip" class="hidden">
+        <p><span id="value"></p>
+</div>
+<div id="drop"></div>
+
+<form oninput="output.value = input.value" style="top:10px;left:10px;">
+  <input id="input" type="range" min="1" max="20000" value="1" style="width:240px;height:20px; background-color:green;">
+  <i>link time</i> = <output name="output" for="input">1</output>
+</form>
+
+<body>
+<h2> Using Common Words to Analyze Passwords with Packing Digit and Symbols</h2>
+<script src="https://code.jquery.com/jquery-1.11.0.min.js"></script>
+
+<script src="https://d3js.org/d3.v3.min.js"></script>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/d3/3.5.5/d3.min.js"></script>
+
+<script>
+
+var dispatch = d3.dispatch("load", "statechange");
+var nodeMap=d3.map();
+
+//making nodes map, key is node, value is connectList and group
+
+d3.csv("dpDrop.csv", function(error, nodeData){
+
+        if(error){
+
+                console.log(error);
+
+        }
+        nodeData.forEach(function(eachNode){
+             nodeMap.set(eachNode.node,eachNode.value);
+        });
+        dispatch.load(nodeMap);
+
+        dispatch.statechange(["abandon"]);
+
+});
+
+// A drop-down menu for selecting a state; uses the "menu" namespace.
+
+dispatch.on("load.menu", function(dropNodes) {
+
+var select=d3.select("#drop")
+    .append("select")
+    .attr("Multiple", "Multiple")
+    .attr("Size",6)
+      .on("change", function() {
+	var listSelected = dropNodes.get(this.value).name;
+	conn=[]
+	for(var index = 0; index < this.children.length; index++) {
+        if (this.children[index].selected) {
+			selectValue = this.children[index].value;
+			conn.push(selectValue);
+            }
+        }
+		dispatch.statechange(conn);
+	});
+  select.selectAll("option")
+      .data(dropNodes.keys())
+    .enter().append("option")
+      .attr("value", function(d) { return d; })
+	.text(function(d) {return d;});
+
+//state change.
+
+dispatch.on("statechange.menu", function(ThisNode) {
+    var selectedVal;
+	for (var i=0; i< ThisNode.length; i++){
+        select.property("value", ThisNode[i]);
+	}
+        $.post("GetJsonFile1.php",{selectedVal:ThisNode},function(data){
+			view(ThisNode);
+		});
+	});
+})
+
+function view(selectedWordsforDropList){
+	d3.selectAll("svg").remove();//every time remove the svg content and replace the new graph.
+	var  m = [10, 10, 10, 10],
+		w = 1200,
+		h = 700;
+	var force = d3.layout.force()
+		.gravity(0.05)
+		.distance(200)
+		.friction(0.1)
+		.charge(-50)
+		.alpha(0.1);
+
+	var dispatch = d3.dispatch("load", "statechange");
+	d3.json("phpOut.json", function(error, json) {
+		var sliderVal=0;
+		var aNodeMap=d3.map();
+		var nodeARY=[];
+		var linkARY=[];
+		for(var i=0; i<json.links.length; i++){
+			d=JSON.parse(json.links[i]);
+			linkARY.push(d);
+		}
+		for(var i=0; i<json.nodes.length; i++){
+			d=JSON.parse(json.nodes[i]);
+			nodeARY.push(d);
+		}
+		d3.select("form")
+			.on("input", function() { change(+this.output.value); });
+		change(1);
+		function change(k){
+			sliderVal=k;
+			d3.selectAll("svg").remove();
+			nodeARY.forEach(function(aNode){aNodeMap.set(aNode.index1,0);});
+			linkARY.forEach(function(alink){
+				if ((typeof alink.source!='undefined') && (typeof alink.target!='undefined')){
+				if (alink.value >= sliderVal){
+					if((typeof alink.source === 'number') && (typeof alink.target ==='number')){
+					var avalue=aNodeMap.get(alink.source);
+					avalue=avalue+1;
+					aNodeMap.set(alink.source,avalue);
+					avalue=aNodeMap.get(alink.target);
+					avalue=avalue+1;		
+					aNodeMap.set(alink.target,avalue);
+				}
+
+				if((typeof alink.source === 'object') && (typeof alink.target ==='object')){
+					var avalue=aNodeMap.get(alink.source.index1);
+					avalue=avalue+1;
+					aNodeMap.set(alink.source.index1,avalue);
+					avalue=aNodeMap.get(alink.target.index1);
+					avalue=avalue+1;		
+					aNodeMap.set(alink.target.index1,avalue);
+				}
+			}
+		}	
+	});    
+	nodeARY.forEach(function(d){d.linkCount=aNodeMap.get(d.index1);});
+	var nodeARY1=nodeARY;
+	var linkARY1=linkARY;
+	linkdata=[]
+	linkARY1.forEach(function(d){
+		if ((typeof d.source ==='number')&&(typeof d.target ==='number')){
+		linkdata.push(d);
+		}
+	});
+
+	force.nodes(nodeARY1.filter(function(d){return d.linkCount;}));
+	force.links(linkARY1.filter(function(d){return d.value>=sliderVal;}));
+
+	force.linkDistance(function(d, i){
+		if(d.value>1000){
+			return Math.sqrt(d.value+i);
+		}else if(d.value>100){
+			return (d.value+i)/5;
+		}else{
+	//		return d.value+i+200;
+			return (d.value+i*2+100);
+		}
+
+	})
+         .size([w, h]);
+	force.on("tick", tick);
+	force.start();
+
+//force.tick();
+
+	var zoom = d3.behavior.zoom()
+			 .scaleExtent([1, 5])
+			 .on("zoom", zoomed);
+	var svg = d3.select("body").append("svg")
+		.attr("width", w)
+		.attr("height", h
+			.append("svg:g")
+		.attr("class","drawarea")
+	   .append("svg:g")
+		.attr("transform", "translate(" + m[3] + "," + m[0] + ")")
+		.call(zoom);
+
+	function zoomed() {
+		var scale = d3.event.scale,
+			translation = d3.event.translate,
+			tbound = -h * scale,
+			bbound = h * scale,
+			lbound = (-w + m[1]) * scale,
+			rbound = (w - m[3]) * scale;
+			// limit translation to thresholds
+			translation = [
+				Math.max(Math.min(translation[0], rbound), lbound),
+				Math.max(Math.min(translation[1], bbound), tbound)
+			];
+		d3.select(".drawarea")
+			.attr("transform", "translate(" + translation + ")" +
+				  " scale(" + scale + ")");
+	}
+
+	var outline = false;
+	var focus_node = null, highlight_node = null;
+	var highlight_trans = 0.1;
+	var highlight_color = "blue";
+	var default_link_color = "#888";
+	// build the arrow.
+	svg.append("defs").selectAll("marker")
+		.data(["end"])      // Different link/path types can be defined here
+		.enter().append("svg:marker")    // This section adds in the arrows
+		.attr("id", String)
+		.attr("markerUnits", "userSpaceOnUse")//the arrow size is not changed according to stroke-width
+		.attr("viewBox", "0 -5 10 10")
+		.attr("refX", 18)
+		.attr("refY", -0.5)
+		.attr("markerWidth", 10)
+		.attr("markerHeight", 10)
+		.attr("orient", "auto")
+		.append("path")
+		.attr("d", "M0,-5L10,0L0,5");
+	var nominal_stroke = 1.5;
+	var color = ['#99bb00','#ff0000'];
+	// add the links 
+	var path = svg.append("g")
+					.selectAll("path")
+					.data(force.links())
+					.enter().append("path")
+					.attr("class", "link")
+					.attr("marker-end", "url(#end)");
+
+	//add stroke-width, and tip to display the d.value.
+	path.attr("stroke-width",1)
+		.text(function(d) { return d.value; });	
+	var node = svg.selectAll(".node")
+	  .data(force.nodes())
+	  .enter().append("circle")
+	  .attr("class", "node")
+	  .attr("r", 10)
+	  .style("fill", function(d) { return color[d.group]; })
+	  .style("stroke-width", nominal_stroke)
+	  .style("stroke", "white")
+	  .call(force.drag);
+
+	var text=svg.selectAll("text")
+			.data(force.nodes())
+			.enter()
+			.append("text")
+			.attr("x", 10)
+			.attr("y", 20)
+			.text(function(d) { return d.name });
+
+	//the two nodes to distinguish the category.
+
+	var cellSize=(h-100)/10,
+		sign=["NotAPassword","IsAPassword"];
+
+	var legend = svg.selectAll(".legend")
+					.data(sign)
+				  .enter().append("g")
+				  .attr("class", "legend");
+		legend.append("circle")
+			.attr("cy", function(d, i) { return 100 +60*i; })
+			.attr("cx", w/20-20)
+			.attr("r", 10)
+			.style("fill", function(d, i) { return color[i]; });
+
+		legend.append("text")
+			.attr("class", "mono")
+			.text(function(d) { return d; })
+			.attr("width", cellSize*10)
+			.attr("y", function(d, i) { return 110 +60*i; })
+			.attr("x", w/20 );
+
+
+	var linkedByIndex = {};
+	linkARY.forEach(function(d) {
+		linkedByIndex[d.source.index + "," + d.target.index] = true;
+	})
+	
+	function isConnected(a, b) {
+		return linkedByIndex[a.index + "," + b.index] || linkedByIndex[b.index + "," + a.index] || a.index == b.index;
+	}
+	
+	node.on("mouseover", function(d, selectedWordsforDropList){set_highlight(d);})
+		.on("mousedown", function(d) {
+			d3.event.stopPropagation();
+			focus_node = d;
+			set_focus(d);
+
+			if (highlight_node === null) set_highlight(d);
+			d3.select("#tooltip")
+				 .style("left", (d3.event.pageX+400) + "px")
+				 .style("top", (d3.event.pageY-100) + "px")
+				 .select("#value")
+				.call(drag);
+			var toolWords="";
+			$.post("GetTipWords.php",{selectedWord:d.name, selectedAry: selectedWordsforDropList}, function(data){
+			dataLen=data.length;
+			subData=data.substring(2,dataLen-2);
+			var dataAry=subData.split("\",\"");
+			for (var m=0; m<dataAry.length; m++){
+				toolWords=toolWords+"\n"+dataAry[m];
+			}
+				   d3.select("#tooltip").text(toolWords);
+		});
+			//Show the tooltip
+			d3.select("#tooltip").classed("hidden", false);})
+		.on("mouseout", function(d) {exit_highlight();})
+		.on("mouseup",  function() {
+			if (focus_node!==null)
+			{
+				focus_node = null;
+
+				if (highlight_trans<1)
+				{
+					node.style("opacity", 1);
+					text.style("opacity", 1);
+					path.style("opacity", 1);
+				}
+			}
+			if (highlight_node === null) exit_highlight();
+		});
+
+   function exit_highlight()
+   {
+		highlight_node = null;
+		if (focus_node===null)
+		{
+			svg.style("cursor","move");
+			if (highlight_color!="white")
+			{
+				node.style("stroke", "white");
+				text.style("font-weight", "normal");
+				path.style("stroke", default_link_color);
+			}
+		}
+	}
+
+	function set_focus(d)
+	{
+		if (highlight_trans<1)  {
+			node.style("opacity", function(o) {
+				return isConnected(d, o) ? 1 : highlight_trans;
+			});
+			text.style("opacity", function(o) {
+				return isConnected(d, o) ? 1 : highlight_trans;
+			});
+			path.style("opacity", function(o) {
+				return o.source.index == d.index || o.target.index == d.index ? 1 : highlight_trans;
+			});
+		}
+	}
+	function set_highlight(d)
+	{
+		svg.style("cursor","pointer");
+		if (highlight_color!="white")
+		{
+			node.style("stroke", function(o) {
+			   return isConnected(d, o) ? highlight_color : "white";});
+			text.style("font-weight", function(o) {
+			   return isConnected(d, o) ? "bold" : "normal";});
+			path.style("stroke", function(o) {
+			   return o.source.index == d.index || o.target.index == d.index ? highlight_color :default_link_color;
+			});
+		}
+	}
+	
+	var drag = d3.behavior.drag()
+             .origin(function(d) { return d; })
+             .on("dragstart", dragstarted)
+             .on("drag", dragged)
+             .on("dragend", dragended);
+			 
+	function dragstarted(d) {
+          d3.event.sourceEvent.stopPropagation();
+          d3.select(this).classed("dragging", true);
+          force.start();
+    }
+	
+	function dragged(d) {
+        d3.select(this).attr("x", d3.event.x).attr("y", d3.event.y);
+    }
+	
+	function dragended(d) {
+        d3.select(this).classed("dragging", false);
+    }
+	
+	function tick() {
+		path.attr("d", function(d) {
+			var dx = d.target.x - d.source.x,
+				dy = d.target.y - d.source.y,
+				dr = Math.sqrt(dx * dx + dy * dy);
+			return "M" +
+				d.source.x + "," +
+				d.source.y + "A" +
+				dr + "," + dr + " 0 0,1 " +
+				d.target.x + "," +
+				d.target.y;
+		});
+
+		node.attr("transform", function(d) {
+			return "translate(" + d.x + "," + d.y + ")"; });
+		text.attr("transform", function(d) {
+				return "translate(" + d.x + "," + d.y + ")"; });
+	}
+}
+});
+}
+</script>
+
+
+
+
